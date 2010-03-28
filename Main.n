@@ -1,0 +1,287 @@
+﻿using System;
+using System.Console;
+using System.IO;
+using System.Text;
+using Nemerle.Utility;
+using Nemerle.Collections;
+using Nemerle.Imperative;
+
+module Program
+{
+  [Record]
+  class CurrConv
+  {
+    [Accessor] public from : string;
+    [Accessor] public to   : string;
+    [Accessor(flags=WantSetter)] public mutable course : double;
+    
+    [Accessor] public file : string;
+    [Accessor] public line : int;
+  }
+
+  [Record]
+  class Account
+  {
+    [Accessor] public currency : string;
+    [Accessor] public balance  : double;
+    [Accessor] public name     : string;
+    
+    [Accessor] public file : string;
+    [Accessor] public line : int;
+  }
+  
+  enum TransactionType
+  {
+    | Plus
+    | Minus
+  }
+  
+  [Record]
+  class Transaction
+  {
+    [Accessor] public transactionType : TransactionType;
+    [Accessor] public amount          : double;
+    [Accessor] public currency        : string;
+    [Accessor] public account         : string;
+    [Accessor] public comment         : string;
+
+    [Accessor] public file : string;
+    [Accessor] public line : int;
+  }
+
+  [Record]
+  class Level1
+  {
+    [Accessor] public comment  : string;
+    [Accessor] public currency : string;
+    [Accessor(flags=WantSetter)] public mutable credit   : double;
+    [Accessor(flags=WantSetter)] public mutable debit    : double;
+  }
+
+  [Record]
+  class Balance
+  {
+    [Accessor] public account  : string;
+    [Accessor] public currency : string;
+    [Accessor] public begin    : double;
+    [Accessor(flags=WantSetter)] public mutable credit   : double;
+    [Accessor(flags=WantSetter)] public mutable debit    : double;
+    
+    public End : double
+    {
+      get
+      {
+        begin + credit - debit
+      }
+    }
+  }
+  
+  class Processor
+  {
+    mutable currencies   : list[CurrConv]    = [];
+    mutable accounts     : list[Account]     = [];
+    mutable transactions : list[Transaction] = [];
+    
+    private CurConvert(from : string, to : string, file : string, line : int) : double
+    {
+      if (from == to)
+        1.0
+      else
+      {
+        def fromTo = currencies.Find(x => x.From == from && x.To == to);
+        if (fromTo.IsSome)
+          fromTo.Value.Course
+        else
+        {
+          def toFrom = currencies.Find(x => x.From == to && x.To == from);
+          if (toFrom.IsSome)
+            1 / toFrom.Value.Course
+          else
+            throw  ApplicationException($"Can't find convertion from '$from' to '$to' (line: $line, file: '$file').");
+        }
+      }
+    }
+    
+    public Process(folder : string) : void
+    {
+      ProcessFolder(folder);
+      
+      mutable level1  = [];
+      mutable balance = [];
+      
+      foreach (acc in accounts)
+        balance = Balance(acc.Name, acc.Currency, acc.Balance, 0, 0) :: balance;
+      
+      foreach(tr in transactions)
+      {
+        def item = match(level1.Find(x => x.Comment == tr.Comment && x.Currency == tr.Currency))
+        {
+          | Some(val = v) => v
+          | None => 
+            def newItem = Level1(tr.Comment, tr.Currency, 0, 0);
+            level1 = newItem :: level1;
+            newItem
+        }
+        
+        def bl = match (balance.Find(x => x.Account == tr.Account))
+        {
+          | Some(val = v) => v
+          | _ => throw ApplicationException($"Can't find account '$(tr.Account)' (line: $(tr.Line), file: '$(tr.File)').");
+        }
+        
+        match(tr.TransactionType)
+        {
+          | Plus  => 
+            item.Credit += tr.Amount;
+            bl.Credit   += tr.Amount / CurConvert(tr.Currency, bl.Currency, tr.File, tr.Line)
+            
+          | Minus => 
+            item.Debit  += tr.Amount;
+            bl.Debit    += tr.Amount / CurConvert(tr.Currency, bl.Currency, tr.File, tr.Line)
+        }
+      }
+      
+      WriteLine("Группировка уровня 1");
+      WriteLine("--------------------");
+      foreach (l1 in level1)
+        WriteLine(String.Format("{0,15} {1,3}   credit:{2,5}   debit:{3,5}",
+          l1.Comment, l1.Currency, Convert.ToInt32(l1.Credit), Convert.ToInt32(l1.Debit)));
+        //WriteLine($"$(l1.Comment) $(l1.Currency) credit:$(l1.Credit) debit:$(l1.Debit)");
+        
+      WriteLine("");
+      WriteLine("Оборотная ведомость");
+      WriteLine("--------------------");
+      foreach (bl in balance)
+        WriteLine(String.Format("{0,5} {1,3}   begin:{2,5}   credit:{3,5}   debit:{4,5}   end:{5,5}",
+          bl.Account, bl.Currency, 
+          Convert.ToInt32(bl.Begin), Convert.ToInt32(bl.Credit), 
+          Convert.ToInt32(bl.Debit), Convert.ToInt32(bl.End)));
+        //WriteLine($"$(bl.Account) $(bl.Currency) begin:$(bl.Begin) credit:$(bl.Credit) debit:$(bl.Debit) end:$(bl.End)");
+    }
+    
+    private ProcessFolder(folder : string) : void
+    {
+      def files = Directory.GetFiles(folder, "*.txt").ToList().Sort((x, y) => (String.Compare(x, y, true)));
+      foreach (f in files)
+        ProcessFile(f);
+      
+      def folders = Directory.GetDirectories(folder).ToList().Sort((x, y) => (String.Compare(x, y, true)));
+      foreach (f in folders)
+        ProcessFolder(f);
+    }
+    
+    private ParseCommand(file : string, line : int, words : array[string]) : void
+    {
+      if (words[0] == "#" && words.Length > 1 && words[1] == "rate")
+      {
+        if (words.Length <= 4)
+          throw ApplicationException($"Bad # rate command (line: $line, file: '$file').");
+        else
+        {
+          def cur1 = words[2];
+          def cur2 = words[3];
+          mutable course;
+          if (!Double.TryParse(words[4], out course))
+            throw ApplicationException($"Can't parse amount '$(words[4])' (line: $line, file: '$file').");
+          else
+          {
+            when (course == 0)
+              throw ApplicationException($"Convertion course can't be 0 (line: $line, file: '$file').");
+              
+            def item = currencies.Find(x => x.From == cur1 && x.To == cur2);
+            if (item.IsSome)
+              item.Value.Course = course;
+            else
+            {
+              def item = currencies.Find(x => x.From == cur2 && x.To == cur1);
+              if (item.IsSome)
+                item.Value.Course = 1 / course;
+              else
+                currencies = CurrConv(cur1, cur2, course, file, line) :: currencies;
+            }
+          }
+        }
+      }
+      else when (words[0] == "#" && words.Length > 1 && words[1] == "account")
+      {
+        if (words.Length <= 4)
+          throw ApplicationException($"Bad # account command (line: $line, file: '$file').");
+        else
+        {
+          def name = words[4];
+          def acc = accounts.Find(x => x.Name == name);
+          when (acc.IsSome)
+            throw ApplicationException($"Account '$name' was already defined  (line: $line, file: '$file').");
+            
+          def cur = words[2];
+          mutable balance;
+          if (Double.TryParse(words[3], out balance))
+            accounts = Account(cur, balance, name, file, line) :: accounts;
+          else
+            throw ApplicationException($"Can't parse amount '$(words[3])' (line: $line, file: '$file').");
+        }
+      }
+    }
+    
+    private ParseCreditDebit(file : string, line: int, words : array[string]) : void
+    {
+      when (words.Length >= 5)
+      {
+        def trType = match(words[0])
+        {
+          | "+" => TransactionType.Plus
+          | "-" => TransactionType.Minus
+          | _   => throw ApplicationException($"Bad line type '$(words[0])' (line: $line, file: '$file').");
+        }
+        
+        mutable amount;
+        when (!Double.TryParse(words[1], out amount))
+          throw ApplicationException($"Can't parse amount '$(words[1])' (line: $line, file: '$file').");
+      
+        def cur = words[2];
+        def accName = words[3];
+        def acc = accounts.Find(x => x.Name == accName);
+        when (acc.IsNone)
+          throw ApplicationException($"Can't find account '$accName' (line: $line, file: '$file').");
+          
+        def comment = words[4];
+        transactions = Transaction(trType, amount, cur, acc.Value.Name, comment, file, line) :: transactions;
+      }
+    }
+    
+    private ProcessFile(file : string) : void
+    {
+      def lines = File.ReadAllLines(file, Encoding.GetEncoding(1251));
+      mutable lineIndex = 0;
+      foreach(line in lines)
+      {
+        lineIndex += 1;
+        def line = line.Trim();
+        def words = line.Split(array[' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+        when (words.Length > 0)
+        {
+          match(words[0])
+          {
+            | "#" => ParseCommand(file, lineIndex, words)
+            | "+" | "-" => ParseCreditDebit(file, lineIndex, words)
+            | _ => ()
+          }
+        }
+      }
+    }
+  }
+  
+  Main() : void
+  {
+    try
+    {
+      def proc = Processor();
+      //proc.ProcessFolder(".");
+      proc.Process(@".\test");
+    }
+    catch
+    {
+      | e is Exception => WriteLine($"Error: $(e.Message)");
+    }
+  }
+}
