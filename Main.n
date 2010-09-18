@@ -284,5 +284,4 @@ module Program
       | e is Exception => WriteLine($"Error: $(e.Message)");
     }
   }
-  // some test
 }
