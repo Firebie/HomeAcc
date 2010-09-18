@@ -76,7 +76,7 @@ module Program
     }
   }
   
-  class Processor
+  class Accountant
   {
     mutable currencies   : list[CurrConv]    = [];
     mutable accounts     : list[Account]     = [];
@@ -275,9 +275,7 @@ module Program
   {
     try
     {
-      def proc = Processor();
-      //proc.ProcessFolder(".");
-      proc.Process(@".\test");
+      Accountant().Process(@".\test");
     }
     catch
     {
