@@ -14,9 +14,6 @@ module Program
     [Accessor] public from : string;
     [Accessor] public to   : string;
     [Accessor(flags=WantSetter)] public mutable course : double;
-    
-    [Accessor] public file : string;
-    [Accessor] public line : int;
   }
 
   [Record]
@@ -25,9 +22,6 @@ module Program
     [Accessor] public currency : string;
     [Accessor] public balance  : double;
     [Accessor] public name     : string;
-    
-    [Accessor] public file : string;
-    [Accessor] public line : int;
   }
   
   enum TransactionType
@@ -44,9 +38,6 @@ module Program
     [Accessor] public currency        : string;
     [Accessor] public account         : string;
     [Accessor] public comment         : string;
-
-    [Accessor] public file : string;
-    [Accessor] public line : int;
   }
 
   [Record]
@@ -76,13 +67,13 @@ module Program
     }
   }
   
-  class Accountant
+  class Processor
   {
     mutable currencies   : list[CurrConv]    = [];
     mutable accounts     : list[Account]     = [];
     mutable transactions : list[Transaction] = [];
     
-    private CurConvert(from : string, to : string, file : string, line : int) : double
+    private CurConvert(from : string, to : string) : double
     {
       if (from == to)
         1.0
@@ -97,7 +88,7 @@ module Program
           if (toFrom.IsSome)
             1 / toFrom.Value.Course
           else
-            throw  ApplicationException($"Can't find convertion from '$from' to '$to' (line: $line, file: '$file').");
+            throw  ApplicationException($"Can't find convertion from '$from' to '$to'.");
         }
       }
     }
@@ -126,30 +117,33 @@ module Program
         def bl = match (balance.Find(x => x.Account == tr.Account))
         {
           | Some(val = v) => v
-          | _ => throw ApplicationException($"Can't find account '$(tr.Account)' (line: $(tr.Line), file: '$(tr.File)').");
+          | _ => throw ApplicationException($"Can't find account '$(tr.Account)'.");
         }
         
         match(tr.TransactionType)
         {
           | Plus  => 
             item.Credit += tr.Amount;
-            bl.Credit   += tr.Amount / CurConvert(tr.Currency, bl.Currency, tr.File, tr.Line)
+            bl.Credit   += tr.Amount / CurConvert(tr.Currency, bl.Currency)
             
           | Minus => 
             item.Debit  += tr.Amount;
-            bl.Debit    += tr.Amount / CurConvert(tr.Currency, bl.Currency, tr.File, tr.Line)
+            bl.Debit    += tr.Amount / CurConvert(tr.Currency, bl.Currency)
         }
       }
       
-      WriteLine("Группировка уровня 1");
+      WriteLine("Level 1 grouping");
       WriteLine("--------------------");
+      
+      def maxCommentLen = level1.FoldLeft(0, (x, len) => Math.Max(x.Comment.Length, len));
+      
       foreach (l1 in level1)
-        WriteLine(String.Format("{0,15} {1,3}   credit:{2,5}   debit:{3,5}",
+        WriteLine(String.Format($"{0,$(maxCommentLen + 3)} {1,3}   credit:{2,5}   debit:{3,5}",
           l1.Comment, l1.Currency, Convert.ToInt32(l1.Credit), Convert.ToInt32(l1.Debit)));
         //WriteLine($"$(l1.Comment) $(l1.Currency) credit:$(l1.Credit) debit:$(l1.Debit)");
         
       WriteLine("");
-      WriteLine("Оборотная ведомость");
+      WriteLine("Results");
       WriteLine("--------------------");
       foreach (bl in balance)
         WriteLine(String.Format("{0,5} {1,3}   begin:{2,5}   credit:{3,5}   debit:{4,5}   end:{5,5}",
@@ -185,9 +179,6 @@ module Program
             throw ApplicationException($"Can't parse amount '$(words[4])' (line: $line, file: '$file').");
           else
           {
-            when (course == 0)
-              throw ApplicationException($"Convertion course can't be 0 (line: $line, file: '$file').");
-              
             def item = currencies.Find(x => x.From == cur1 && x.To == cur2);
             if (item.IsSome)
               item.Value.Course = course;
@@ -197,7 +188,7 @@ module Program
               if (item.IsSome)
                 item.Value.Course = 1 / course;
               else
-                currencies = CurrConv(cur1, cur2, course, file, line) :: currencies;
+                currencies = CurrConv(cur1, cur2, course) :: currencies;
             }
           }
         }
@@ -216,7 +207,7 @@ module Program
           def cur = words[2];
           mutable balance;
           if (Double.TryParse(words[3], out balance))
-            accounts = Account(cur, balance, name, file, line) :: accounts;
+            accounts = Account(cur, balance, name) :: accounts;
           else
             throw ApplicationException($"Can't parse amount '$(words[3])' (line: $line, file: '$file').");
         }
@@ -245,7 +236,7 @@ module Program
           throw ApplicationException($"Can't find account '$accName' (line: $line, file: '$file').");
           
         def comment = words[4];
-        transactions = Transaction(trType, amount, cur, acc.Value.Name, comment, file, line) :: transactions;
+        transactions = Transaction(trType, amount, cur, acc.Value.Name, comment) :: transactions;
       }
     }
     
@@ -271,11 +262,17 @@ module Program
     }
   }
   
-  Main() : void
+  Main(arg : array[string]) : void
   {
     try
     {
-      Accountant().Process(@".\test");
+      def start = match(arg.Length)
+        {
+          | 1 => arg[0]
+          | _ => "."
+        };
+      
+      Processor().Process(start);
     }
     catch
     {
