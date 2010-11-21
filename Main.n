@@ -140,7 +140,6 @@ module Program
       foreach (l1 in level1)
         WriteLine(String.Format($"{0,$(maxCommentLen + 3)} {1,3}   credit:{2,5}   debit:{3,5}",
           l1.Comment, l1.Currency, Convert.ToInt32(l1.Credit), Convert.ToInt32(l1.Debit)));
-        //WriteLine($"$(l1.Comment) $(l1.Currency) credit:$(l1.Credit) debit:$(l1.Debit)");
         
       WriteLine("");
       WriteLine("Results");
@@ -150,7 +149,6 @@ module Program
           bl.Account, bl.Currency, 
           Convert.ToInt32(bl.Begin), Convert.ToInt32(bl.Credit), 
           Convert.ToInt32(bl.Debit), Convert.ToInt32(bl.End)));
-        //WriteLine($"$(bl.Account) $(bl.Currency) begin:$(bl.Begin) credit:$(bl.Credit) debit:$(bl.Debit) end:$(bl.End)");
     }
     
     private ProcessFolder(folder : string) : void
